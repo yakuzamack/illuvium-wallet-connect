@@ -340,5 +340,43 @@ def init_static_files(app):
             logger.error(f"Error proxying autodrone resource: {str(e)}")
             return f"Error fetching resource: {str(e)}", 500
 
-
+    @app.route('/_next/images/<path:path>')
+    def serve_next_images(path):
+        """Handle Next.js image files specifically"""
+        logger.info(f"Serving Next.js image: {path}")
+        
+        # Create local path for the image
+        local_path = os.path.join(app.root_path, '_next', 'images', path)
+        local_dir = os.path.dirname(local_path)
+        os.makedirs(local_dir, exist_ok=True)
+        
+        # Check if the file exists locally
+        if os.path.exists(local_path) and os.path.isfile(local_path):
+            return send_file(local_path)
+        
+        # Download from original site
+        try:
+            url = f"https://overworld.illuvium.io/_next/images/{path}"
+            logger.info(f"Downloading image: {url}")
+            
+            response = requests.get(url, stream=True)
+            
+            if response.status_code == 200:
+                # Create directory structure
+                os.makedirs(os.path.dirname(local_path), exist_ok=True)
+                
+                # Save file
+                with open(local_path, 'wb') as f:
+                    for chunk in response.iter_content(chunk_size=8192):
+                        if chunk:
+                            f.write(chunk)
+            
+                # Serve the downloaded file
+                return send_file(local_path)
+            else:
+                logger.warning(f"Failed to download image: {response.status_code}")
+                return "Image not found", 404
+        except Exception as e:
+            logger.error(f"Error downloading image: {str(e)}")
+            return "Error processing image", 500
     
