@@ -4,6 +4,9 @@ import requests
 import mimetypes
 import logging
 import io
+import urllib.parse
+import shutil
+
 
 logger = logging.getLogger(__name__)
 
@@ -126,46 +129,149 @@ def init_static_files(app):
     # Add handler for Next.js image optimization
     @app.route('/_next/image')
     def next_image_optimization():
-        """Handle Next.js image optimization requests"""
+        """Enhanced Next.js image optimization handler that preserves transparency"""
+        # Get query parameters
         url = request.args.get('url', '')
         width = request.args.get('w', '256')
         quality = request.args.get('q', '75')
         
-
+        logger.info(f"Image optimization request: url={url}, w={width}, q={quality}")
+        
         if not url:
             return "Missing url parameter", 400
         
+        # URL decode the image path
+        decoded_url = urllib.parse.unquote(url)
+        
         # Generate cache path
-        cache_key = f"{url.replace('/', '_')}_{width}_{quality}"
+        cache_key = f"{decoded_url.replace('/', '_')}_{width}_{quality}"
         cache_dir = os.path.join(app.root_path, 'image_cache')
         os.makedirs(cache_dir, exist_ok=True)
         cache_path = os.path.join(cache_dir, cache_key)
         
         # Check if cached
-        if os.path.exists(cache_path):
+        if os.path.exists(cache_path) and os.path.getsize(cache_path) > 0:
             logger.info(f"Serving cached image: {cache_path}")
-            return send_file(cache_path)
-        
-        # Proxy to original
-        try:
-            proxy_url = f"https://overworld.illuvium.io/_next/image?url={url}&w={width}&q={quality}"
-            logger.info(f"Proxying image: {proxy_url}")
             
-            response = requests.get(proxy_url, stream=True)
+            # Determine MIME type from file extension
+            content_type = "image/webp"  # Default for Next.js images
+            if decoded_url.lower().endswith('.png'):
+                content_type = "image/png"
+            elif decoded_url.lower().endswith(('.jpg', '.jpeg')):
+                content_type = "image/jpeg"
+            
+            # Use send_file with only supported parameters
+            return send_file(
+                cache_path,
+                mimetype=content_type
+            )
+        
+        # Not found in cache, try direct proxy to Next.js image optimizer
+        try:
+            # First try to get the image from the original Next.js optimizer
+            original_url = f"https://overworld.illuvium.io/_next/image?url={url}&w={width}&q={quality}"
+            logger.info(f"Fetching from original Next.js: {original_url}")
+            
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/93.0.4577.82 Safari/537.36',
+                'Accept': 'image/webp,image/png,image/*,*/*;q=0.8'
+            }
+            
+            response = requests.get(original_url, headers=headers, stream=True)
             
             if response.status_code == 200:
-                # Save to cache
+                # Save the image to cache (as raw binary data to preserve all image data)
                 with open(cache_path, 'wb') as f:
                     for chunk in response.iter_content(chunk_size=8192):
                         if chunk:
                             f.write(chunk)
                 
-                # Serve file
-                return send_file(cache_path)
-            else:
-                return "Image not found", 404
+                logger.info(f"Successfully downloaded image: {cache_path}")
+                
+                # Get the content type from the response headers
+                content_type = response.headers.get('Content-Type', 'image/webp')
+                
+                # Serve the cached file with the correct content type
+                return send_file(
+                    cache_path,
+                    mimetype=content_type
+                )
         except Exception as e:
-            logger.error(f"Error proxying image: {str(e)}")
+            logger.warning(f"Error with Next.js proxy: {str(e)}")
+        
+        # If Next.js proxy failed, try to serve the original image directly
+        try:
+            # If url starts with /, it's a local path
+            if decoded_url.startswith('/'):
+                # First check if image exists in local images directory
+                local_path = os.path.join(app.root_path, decoded_url.lstrip('/'))
+                
+                if os.path.exists(local_path) and os.path.isfile(local_path):
+                    logger.info(f"Serving local image: {local_path}")
+                    
+                    # Determine content type from file extension
+                    _, ext = os.path.splitext(local_path)
+                    if ext.lower() == '.webp':
+                        content_type = 'image/webp'
+                    elif ext.lower() == '.png':
+                        content_type = 'image/png'
+                    elif ext.lower() in ('.jpg', '.jpeg'):
+                        content_type = 'image/jpeg'
+                    else:
+                        content_type = 'application/octet-stream'
+                    
+                    # Copy file to cache so future requests go through cache
+                    shutil.copyfile(local_path, cache_path)
+                    
+                    # Return the file with explicit mimetype
+                    return send_file(
+                        local_path,
+                        mimetype=content_type
+                    )
+                else:
+                    # Try to download from original website
+                    original_file_url = f"https://overworld.illuvium.io{decoded_url}"
+                    logger.info(f"Trying to download original image: {original_file_url}")
+                    
+                    orig_response = requests.get(original_file_url, headers=headers, stream=True)
+                    
+                    if orig_response.status_code == 200:
+                        # Save the original image
+                        local_dir = os.path.dirname(local_path)
+                        os.makedirs(local_dir, exist_ok=True)
+                        
+                        with open(local_path, 'wb') as f:
+                            for chunk in orig_response.iter_content(chunk_size=8192):
+                                if chunk:
+                                    f.write(chunk)
+                        
+                        # Also save to cache
+                        shutil.copyfile(local_path, cache_path)
+                        
+                        logger.info(f"Downloaded original image: {local_path}")
+                        
+                        # Get content type
+                        content_type = orig_response.headers.get('Content-Type', 'image/webp')
+                        
+                        # Return the downloaded file
+                        return send_file(
+                            local_path,
+                            mimetype=content_type
+                        )
+        
+            # If we've reached here, we couldn't get the image
+            logger.error(f"Failed to serve image for: {decoded_url}")
+            
+            # Try a default placeholder as last resort
+            placeholder_path = os.path.join(app.root_path, 'static', 'placeholder.webp')
+            if os.path.exists(placeholder_path):
+                return send_file(placeholder_path, mimetype='image/webp')
+            
+            return "Image not found", 404
+        except Exception as e:
+            logger.error(f"Error serving image: {str(e)}")
+            import traceback
+            logger.error(traceback.format_exc())
             return "Error processing image", 500
     
     # Add direct route for JS files that are causing issues
@@ -379,4 +485,31 @@ def init_static_files(app):
         except Exception as e:
             logger.error(f"Error downloading image: {str(e)}")
             return "Error processing image", 500
+    @app.after_request
+    def add_security_headers(response):
+        """Add security headers to all responses"""
+        # Set a more permissive CSP header that allows media content
+        csp = (
+            "default-src 'self' * 'unsafe-inline' 'unsafe-eval'; "
+            "font-src 'self' * data: 'unsafe-inline'; "
+            "img-src 'self' * data: blob: 'unsafe-inline'; "
+            "style-src 'self' * 'unsafe-inline'; "
+            "script-src 'self' * 'unsafe-inline' 'unsafe-eval'; "
+            "connect-src 'self' * 'unsafe-inline'; "
+            "media-src 'self' * blob: data:; "  # Explicitly allow media sources
+            "worker-src 'self' blob:; "  # Allow web workers if needed
+            "frame-src 'self' *; "  # Allow iframes if needed
+        )
+        
+        # Set the CSP header
+        response.headers['Content-Security-Policy'] = csp
+        
+        # Add CORS headers for all responses
+        if request.path.startswith(('/proxy/media/', '/media/')):
+            response.headers['Access-Control-Allow-Origin'] = '*'
+            response.headers['Access-Control-Allow-Methods'] = 'GET, OPTIONS'
+            response.headers['Access-Control-Allow-Headers'] = 'Origin, Content-Type, Accept'
+            response.headers['Cross-Origin-Resource-Policy'] = 'cross-origin'
+        
+        return response
     
