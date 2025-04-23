@@ -78,7 +78,7 @@ document.addEventListener('DOMContentLoaded', function () {
     // Buttons
     'Play for Free': 'Claim Your Mint',
     'Play Now': 'Grab Your Spot',
-    'Log In with Passport': 'Connect Wallet',
+    'Log In with Passport': 'Start Now',
     'Connect Wallet': 'Connect Wallet',
     'Launch Game': 'Get Yours',
     'Create Account': 'New Account',
