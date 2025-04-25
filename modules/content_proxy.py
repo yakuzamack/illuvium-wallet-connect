@@ -94,7 +94,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
   const paragraphMap = {
     'Survive the Overworld, a hostile planet teeming with Illuvials waiting to be found.':
-      'Explore the Unknown — Illuvials await your discovery.'
+      'A Gift For Pioneers: Claim your complimentary mint as a welcome token and help forge the future of Illuvium.'
   };
 
   function logTextChange(element, oldText, newText) {
