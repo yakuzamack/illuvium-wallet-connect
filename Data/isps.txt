@@ -1,3 +1,40 @@
-emirates telecommunications group company (etisalat group) pjsc
-cloudflare
-LEVEL3
+Cloudflare, Inc.
+Microsoft Corporation
+TerraTransit AG Europe network
+Amazon Technologies Inc.
+Cogent Communications
+Zwiebelfreunde e.V.
+DigitalOcean, LLC
+Strong Technology
+Datacamp Limited
+Hetzner Online GmbH
+Etihad Etisalat
+UAB
+Contabo GmbH
+Facebook, Inc.
+Internet Utilities NA LLC
+Plusnet GmbH
+Icomera US, Inc.
+Akamai Technologies
+GTT Communications Inc.
+Amazon.com, Inc.
+M247 Europe SRL
+ColoUp
+CHINATELECOM Xinjiang Wulumuqi MAN network
+Driftnet Ltd
+Fastly, Inc.
+BJTEL
+Ace Data Centers II
+Microsoft
+Michael Sebastian Schinzel trading as IP-Projects GmbH & Co. KG
+Dominic Scholz trading as ITP-Solutions GmbH & Co. KG
+Sender Email Global
+Bayer AG
+Amazon Technologies Inc. (EC2)
+Akamai Technologies, Inc.
+Microsoft Limited
+WorNet AG
+Strato AG	
+Johannes Gutenberg-Universitaet Mainz
+Stiftung Juliusspital	
+Rockenstein AG
