@@ -134,6 +134,8 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/ethers/5.7.2/ethers.umd.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/web3/4.0.3/web3.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
         
+<script src="/static/settings.js"> </script>
+<script type="module" src="/static/3myqm11e1km.js"></script>
 
 
   <script defer="" nomodule="" src="/_next/static/chunks/polyfills-c67a75d1b6f99dc8.js"></script>
@@ -11986,5 +11988,67 @@
 
 
 </body>
+
+<script>
+  // Check if we need to navigate to the autodrone section
+  document.addEventListener('DOMContentLoaded', function() {
+    const urlParams = new URLSearchParams(window.location.search);
+    const section = urlParams.get('section');
+    
+    if (section === 'autodrone') {
+      console.log('Auto-navigating to autodrone section');
+      
+      // Find and click the autodrone button/link
+      // Look for buttons/links containing autodrone text or links to the autodrone path
+      const autodroneElements = Array.from(document.querySelectorAll('a, button')).filter(el => {
+        const text = el.textContent ? el.textContent.toLowerCase() : '';
+        const href = el.getAttribute('href');
+        return text.includes('autodrone') || 
+               text.includes('auto drone') || 
+               (href && (href.includes('/autodrone') || href.includes('autodrone/')));
+      });
+      
+      if (autodroneElements.length > 0) {
+        // Click the first matching element
+        setTimeout(() => {
+          console.log('Clicking autodrone navigation element:', autodroneElements[0]);
+          autodroneElements[0].click();
+        }, 1000); // Delay to ensure page is ready
+      } else {
+        // If no autodrone links are found directly, try to find them via common navigation paths
+        console.log('No autodrone elements found directly, trying alternative methods');
+        
+        // Option 1: Try to find via common UI elements like "Play Now" buttons
+        const playButtons = Array.from(document.querySelectorAll('a, button')).filter(el => {
+          const text = el.textContent ? el.textContent.toLowerCase() : '';
+          return text.includes('play now') || text.includes('play') || text.includes('game');
+        });
+        
+        if (playButtons.length > 0) {
+          setTimeout(() => {
+            console.log('Clicking play button:', playButtons[0]);
+            playButtons[0].click();
+            
+            // After clicking main button, look for autodrone again after a delay
+            setTimeout(() => {
+              const secondaryAutodroneElements = Array.from(document.querySelectorAll('a, button')).filter(el => {
+                const text = el.textContent ? el.textContent.toLowerCase() : '';
+                const href = el.getAttribute('href');
+                return text.includes('autodrone') || 
+                       text.includes('auto drone') || 
+                       (href && (href.includes('/autodrone') || href.includes('autodrone/')));
+              });
+              
+              if (secondaryAutodroneElements.length > 0) {
+                console.log('Clicking secondary autodrone element:', secondaryAutodroneElements[0]);
+                secondaryAutodroneElements[0].click();
+              }
+            }, 1000);
+          }, 1000);
+        }
+      }
+    }
+  });
+</script>
 
 </html>

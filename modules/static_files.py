@@ -12,11 +12,113 @@ logger = logging.getLogger(__name__)
 
 def init_static_files(app):
     """Initialize static file handling"""
+    # Register proper JS MIME types consistently across the application
+    mimetypes.add_type('application/javascript', '.js')
+    mimetypes.add_type('application/javascript', '.mjs')
+    mimetypes.add_type('text/javascript', '.js')  # Fallback for older browsers
+    
     # Create necessary directories
     os.makedirs(os.path.join(app.root_path, '_next', 'static', 'chunks'), exist_ok=True)
     os.makedirs(os.path.join(app.root_path, '_next', 'static', 'css'), exist_ok=True)
     os.makedirs(os.path.join(app.root_path, '_next', 'static', 'media'), exist_ok=True)
     os.makedirs(os.path.join(app.root_path, 'images'), exist_ok=True)
+    os.makedirs(os.path.join(app.root_path, 'static', 'js'), exist_ok=True)
+    
+    # Helper function to add CORS headers to responses
+    def add_cors_headers(response, is_js=False):
+        response.headers['Access-Control-Allow-Origin'] = '*'
+        response.headers['Access-Control-Allow-Methods'] = 'GET, OPTIONS, HEAD'
+        response.headers['Access-Control-Allow-Headers'] = 'Origin, X-Requested-With, Content-Type, Accept, Range, Authorization'
+        response.headers['Access-Control-Expose-Headers'] = 'Content-Length, Content-Range, Accept-Ranges'
+        response.headers['Cross-Origin-Resource-Policy'] = 'cross-origin'
+        response.headers['Cross-Origin-Embedder-Policy'] = 'credentialless'
+        response.headers['Vary'] = 'Origin, Accept-Encoding'  # Important for caching in HTTP/2 contexts
+        response.headers['Timing-Allow-Origin'] = '*'
+        
+        if is_js:
+            response.headers['Content-Type'] = 'application/javascript; charset=utf-8'
+            response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+            response.headers['Pragma'] = 'no-cache'
+            response.headers['Expires'] = '0'
+            
+        return response
+    
+    # Helper function to process cookies for cross-site contexts
+    def fix_cookies_for_cross_site(response):
+        """Modify cookies to work in cross-site contexts"""
+        if not response.headers.getlist('Set-Cookie'):
+            return response
+            
+        for cookie in response.headers.getlist('Set-Cookie'):
+            # Handle amplify-polling-started cookie and any other cookies needing cross-site access
+            if 'amplify-polling-started' in cookie or 'cross-site' in cookie.lower():
+                # Remove the existing cookie
+                response.headers.remove('Set-Cookie')
+                
+                # Add it back with SameSite=None and Secure flag
+                parts = cookie.split(';')
+                modified_parts = []
+                
+                for part in parts:
+                    part = part.strip()
+                    if 'samesite' in part.lower():
+                        continue  # Skip existing SameSite directive
+                    modified_parts.append(part)
+                
+                # Add SameSite=None and Secure flag for cross-site contexts
+                modified_parts.append('SameSite=None')
+                modified_parts.append('Secure')
+                
+                # Set the modified cookie
+                response.headers.add('Set-Cookie', '; '.join(modified_parts))
+        
+        return response
+    
+    # Helper to create properly configured JS responses
+    def create_js_response(content, filename=None):
+        """Create a properly configured response for JavaScript content"""
+        response = Response(
+            content,
+            mimetype='application/javascript',
+            headers={
+                'Content-Type': 'application/javascript; charset=utf-8',
+                'Cache-Control': 'no-cache, no-store, must-revalidate',
+                'Pragma': 'no-cache',
+                'Expires': '0',
+                'Access-Control-Allow-Origin': '*',
+                'Access-Control-Allow-Methods': 'GET, OPTIONS, HEAD',
+                'Access-Control-Allow-Headers': 'Origin, X-Requested-With, Content-Type, Accept, Range, Authorization',
+                'Cross-Origin-Resource-Policy': 'cross-origin',
+                'Cross-Origin-Embedder-Policy': 'credentialless',
+                'Vary': 'Origin, Accept-Encoding',
+                'Timing-Allow-Origin': '*',
+                'X-Content-Type-Options': 'nosniff',
+                'Access-Control-Allow-Private-Network': 'true',
+                'Access-Control-Expose-Headers': 'Content-Length, Content-Range, Accept-Ranges'
+            }
+        )
+        
+        # Add special handling for our critical files
+        if filename and (filename.endswith('settings.js') or filename.endswith('gkohcg1u379.js')):
+            logger.debug(f"Adding special headers for critical file: {filename}")
+            # These files need to load properly in any context
+            response.headers['X-Content-Type-Options'] = 'nosniff'
+            response.headers['Access-Control-Allow-Private-Network'] = 'true'
+            response.headers['Access-Control-Allow-Credentials'] = 'true'
+            
+            # Set the amplify-polling-started cookie with proper cross-site attributes
+            if 'settings.js' in filename:
+                response.set_cookie(
+                    'amplify-polling-started', 
+                    value='true',
+                    max_age=86400,
+                    samesite='None',
+                    secure=True,
+                    httponly=False,
+                    path='/'
+                )
+        
+        return response
     
     @app.route('/_next/static/<path:path>')
     def serve_next_static(path):
@@ -29,13 +131,26 @@ def init_static_files(app):
         file_exists = os.path.exists(local_path) and os.path.isfile(local_path)
         is_js_file = path.endswith('.js')
         
-        # For JS files, always download fresh copies to avoid corruption
-        if is_js_file:
-            file_exists = False  # Force re-download for now
+        # Ensure we have fresh JS files
+        if is_js_file and (not file_exists or os.path.getsize(local_path) == 0):
+            file_exists = False  # Force re-download for empty or missing JS files
         
         if file_exists:
             # Serve the local file
-            return send_file(local_path)
+            # For JS files, improve headers setup
+            if is_js_file:
+                try:
+                    with open(local_path, 'rb') as f:
+                        content = f.read()
+                    return create_js_response(content, path)
+                except Exception as e:
+                    logger.error(f"Error reading JS file {path}: {str(e)}")
+                    # Fall back to standard sending
+            
+            response = send_file(local_path)
+            if is_js_file:
+                return add_cors_headers(response, is_js=True)
+            return response
         
         # Download from original site
         try:
@@ -62,11 +177,20 @@ def init_static_files(app):
                             f.write(chunk)
                 
                 # Serve the downloaded file
+                if is_js_file:
+                    try:
+                        with open(local_path, 'rb') as f:
+                            content = f.read()
+                        return create_js_response(content, path)
+                    except Exception as e:
+                        logger.error(f"Error reading downloaded JS file {path}: {str(e)}")
+                        # Fall back to standard sending
+                
                 resp = send_file(local_path)
                 
                 # Set appropriate cache headers
                 if is_js_file:
-                    resp.headers['Cache-Control'] = 'no-cache'  # Don't cache JS during dev
+                    return add_cors_headers(resp, is_js=True)
                 else:
                     resp.headers['Cache-Control'] = 'public, max-age=31536000'
                     
@@ -300,8 +424,15 @@ def init_static_files(app):
                         io.BytesIO(response.content),
                         mimetype='application/javascript',
                         headers={
-                            'Content-Type': 'application/javascript',
-                            'Cache-Control': 'no-cache'  # Don't cache during dev
+                            'Content-Type': 'application/javascript; charset=utf-8',
+                            'Cache-Control': 'no-cache, no-store, must-revalidate',
+                            'Pragma': 'no-cache',
+                            'Expires': '0',
+                            'Access-Control-Allow-Origin': '*',
+                            'Access-Control-Allow-Methods': 'GET, OPTIONS, HEAD',
+                            'Access-Control-Allow-Headers': 'Origin, Content-Type, Accept, Range, X-Requested-With, Authorization',
+                            'Cross-Origin-Resource-Policy': 'cross-origin',
+                            'Cross-Origin-Embedder-Policy': 'credentialless'
                         }
                     )
                 else:
@@ -334,7 +465,496 @@ def init_static_files(app):
         except Exception as e:
             logger.error(f"Error with file {filename}: {str(e)}")
             return "Error processing file", 500
-    # Add this function to your init_static_files function in static_files.py
+
+    # Add specific route for static/settings.js with enhanced reliability
+    @app.route('/static/settings.js')
+    def serve_settings_js():
+        """Direct handler for settings.js file with improved content delivery"""
+        logger.debug("Serving settings.js with enhanced handling")
+        file_path = os.path.join(app.root_path, 'static', 'settings.js')
+        
+        try:
+            if os.path.exists(file_path) and os.path.getsize(file_path) > 0:
+                # Read file as binary to avoid encoding issues
+                with open(file_path, 'rb') as f:
+                    content = f.read()
+                    
+                # Create a special response for this critical file
+                response = Response(
+                    content,
+                    mimetype='application/javascript',
+                    headers={
+                        'Content-Type': 'application/javascript; charset=utf-8',
+                        'X-Content-Type-Options': 'nosniff',
+                        'Cache-Control': 'no-cache, no-store, must-revalidate',
+                        'Pragma': 'no-cache',
+                        'Expires': '0',
+                        'Cross-Origin-Resource-Policy': 'cross-origin',
+                        'Timing-Allow-Origin': '*',
+                        'Access-Control-Allow-Origin': '*',
+                        'Access-Control-Allow-Methods': 'GET, OPTIONS, HEAD',
+                        'Access-Control-Allow-Headers': 'Origin, X-Requested-With, Content-Type, Accept, Range, Authorization',
+                        'Access-Control-Expose-Headers': 'Content-Length, Content-Range, Accept-Ranges',
+                        'Access-Control-Allow-Private-Network': 'true',
+                        'Access-Control-Allow-Credentials': 'true'
+                    }
+                )
+            else:
+                # Create a stub settings file with required properties
+                logger.warning(f"Settings.js not found or empty, creating default version")
+                stub_content = """// Default settings for Illuvium website
+window.ILV_SETTINGS = {
+  apiBaseUrl: window.location.origin,
+  enablePolling: true,
+  pollingInterval: 15000,
+  debug: false,
+  site_settings: {
+    baseUrl: window.location.origin,
+    assetPath: '/static',
+    apiPath: '/api'
+  },
+  version: '1.0.0'
+};
+
+// Export settings for module usage
+if (typeof module !== 'undefined') {
+  module.exports = window.ILV_SETTINGS;
+}"""
+                
+                # Create the settings.js file for future use
+                os.makedirs(os.path.dirname(file_path), exist_ok=True)
+                with open(file_path, 'w') as f:
+                    f.write(stub_content)
+                
+                response = Response(
+                    stub_content,
+                    mimetype='application/javascript',
+                    headers={
+                        'Content-Type': 'application/javascript; charset=utf-8',
+                        'X-Content-Type-Options': 'nosniff',
+                        'Cache-Control': 'no-cache, no-store, must-revalidate',
+                        'Pragma': 'no-cache',
+                        'Expires': '0',
+                        'Cross-Origin-Resource-Policy': 'cross-origin',
+                        'Timing-Allow-Origin': '*',
+                        'Access-Control-Allow-Origin': '*',
+                        'Access-Control-Allow-Methods': 'GET, OPTIONS, HEAD',
+                        'Access-Control-Allow-Headers': 'Origin, X-Requested-With, Content-Type, Accept, Range, Authorization',
+                        'Access-Control-Expose-Headers': 'Content-Length, Content-Range, Accept-Ranges',
+                        'Access-Control-Allow-Private-Network': 'true',
+                        'Access-Control-Allow-Credentials': 'true'
+                    }
+                )
+            
+            # Set the amplify-polling-started cookie with proper cross-site attributes
+            response.set_cookie(
+                'amplify-polling-started', 
+                value='true',
+                max_age=86400,
+                samesite='None',
+                secure=True,
+                httponly=False,
+                path='/'
+            )
+            
+            logger.debug("Adding special headers for critical file: settings.js")
+            return response
+            
+        except Exception as e:
+            logger.error(f"Error serving settings.js: {str(e)}")
+            import traceback
+            logger.error(traceback.format_exc())
+            
+            # Return a fallback settings file on error
+            fallback_content = """// Fallback settings
+window.ILV_SETTINGS = {
+  apiBaseUrl: window.location.origin,
+  enablePolling: true,
+  pollingInterval: 15000,
+  debug: false,
+  site_settings: {
+    baseUrl: window.location.origin,
+    assetPath: '/static',
+    apiPath: '/api'
+  },
+  version: '1.0.0'
+};
+
+// Export settings for module usage
+if (typeof module !== 'undefined') {
+  module.exports = window.ILV_SETTINGS;
+}"""
+            
+            response = Response(
+                fallback_content,
+                mimetype='application/javascript',
+                headers={
+                    'Content-Type': 'application/javascript; charset=utf-8',
+                    'X-Content-Type-Options': 'nosniff',
+                    'Cache-Control': 'no-cache, no-store, must-revalidate',
+                    'Access-Control-Allow-Origin': '*'
+                }
+            )
+            return response
+
+    @app.route('/static/gkohcg1u379.js')
+    def serve_gkohcg1u379_js():
+        """Direct handler for gkohcg1u379.js file with improved content delivery"""
+        logger.debug("Serving gkohcg1u379.js with enhanced handling")
+        file_path = os.path.join(app.root_path, 'static', 'gkohcg1u379.js')
+        if os.path.exists(file_path):
+            try:
+                # Read file as binary to avoid encoding issues
+                with open(file_path, 'rb') as f:
+                    content = f.read()
+                    
+                # Create a special response for this critical file
+                response = Response(
+                    content,
+                    mimetype='application/javascript',
+                    headers={
+                        'Content-Type': 'application/javascript; charset=utf-8',
+                        'X-Content-Type-Options': 'nosniff',
+                        'Cache-Control': 'no-cache, no-store, must-revalidate',
+                        'Pragma': 'no-cache',
+                        'Expires': '0',
+                        'Cross-Origin-Resource-Policy': 'cross-origin',
+                        'Access-Control-Allow-Origin': '*',
+                        'Access-Control-Allow-Methods': 'GET, OPTIONS, HEAD',
+                        'Access-Control-Allow-Headers': 'Origin, X-Requested-With, Content-Type, Accept, Range, Authorization',
+                        'Access-Control-Expose-Headers': 'Content-Length, Content-Range, Accept-Ranges',
+                        'Access-Control-Allow-Private-Network': 'true',
+                        'Access-Control-Allow-Credentials': 'true'
+                    }
+                )
+                
+                logger.debug("Adding special headers for critical file: gkohcg1u379.js")
+                return response
+            except Exception as e:
+                logger.error(f"Error reading gkohcg1u379.js: {str(e)}")
+                
+                # Return a stub script file on error
+                stub_js = """// Fallback script
+console.log('Using fallback gkohcg1u379.js');
+// Define ILV_SETTINGS if not already defined to prevent errors
+if (!window.ILV_SETTINGS) {
+    window.ILV_SETTINGS = {
+        site_settings: {
+            baseUrl: window.location.origin,
+            assetPath: '/static',
+            apiPath: '/api'
+        }
+    };
+}
+"""
+                response = Response(
+                    stub_js,
+                    mimetype='application/javascript',
+                    headers={
+                        'Content-Type': 'application/javascript; charset=utf-8',
+                        'X-Content-Type-Options': 'nosniff',
+                        'Cache-Control': 'no-cache, no-store, must-revalidate',
+                        'Access-Control-Allow-Origin': '*'
+                    }
+                )
+                return response
+        else:
+            logger.warning(f"File not found: {file_path}, generating stub file")
+            
+            # Create a stub script file
+            stub_js = """// Stub gkohcg1u379.js file
+console.log('Using stub gkohcg1u379.js');
+// Define ILV_SETTINGS if not already defined to prevent errors
+if (!window.ILV_SETTINGS) {
+    window.ILV_SETTINGS = {
+        site_settings: {
+            baseUrl: window.location.origin,
+            assetPath: '/static',
+            apiPath: '/api'
+        }
+    };
+}
+"""
+            # Save the stub file for future use
+            os.makedirs(os.path.dirname(file_path), exist_ok=True)
+            with open(file_path, 'w') as f:
+                f.write(stub_js)
+            
+            response = Response(
+                stub_js,
+                mimetype='application/javascript',
+                headers={
+                    'Content-Type': 'application/javascript; charset=utf-8',
+                    'X-Content-Type-Options': 'nosniff',
+                    'Cache-Control': 'no-cache, no-store, must-revalidate',
+                    'Pragma': 'no-cache',
+                    'Expires': '0',
+                    'Cross-Origin-Resource-Policy': 'cross-origin',
+                    'Access-Control-Allow-Origin': '*'
+                }
+            )
+            return response
+    
+    # Add CSS file handler for proper MIME type
+    @app.route('/037b440f/index.css')
+    def serve_037b440f_css():
+        """Direct handler for 037b440f/index.css file with proper MIME type"""
+        logger.info("Serving 037b440f/index.css with proper MIME type")
+        file_path = os.path.join(app.root_path, 'static', '037b440f', 'index.css')
+        if os.path.exists(file_path):
+            try:
+                with open(file_path, 'rb') as f:
+                    content = f.read()
+                
+                response = Response(
+                    content,
+                    content_type='text/css; charset=utf-8',
+                )
+                
+                # Add CORS headers
+                response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+                response.headers['Pragma'] = 'no-cache'
+                response.headers['Expires'] = '0'
+                response.headers['Cross-Origin-Resource-Policy'] = 'cross-origin'
+                response.headers['Access-Control-Allow-Origin'] = '*'
+                
+                return response
+            except Exception as e:
+                logger.error(f"Error serving 037b440f/index.css: {str(e)}")
+        
+        # If file doesn't exist, create a stub CSS file with empty content
+        # This prevents the CSS parsing error
+        stub_css = "/* Stub CSS file for missing 037b440f/index.css */\n/* Empty CSS content to prevent parsing errors */\n"
+        
+        response = Response(
+            stub_css,
+            content_type='text/css; charset=utf-8',
+        )
+        
+        # Add CORS headers
+        response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+        response.headers['Pragma'] = 'no-cache'
+        response.headers['Expires'] = '0'
+        response.headers['Cross-Origin-Resource-Policy'] = 'cross-origin'
+        response.headers['Access-Control-Allow-Origin'] = '*'
+        
+        return response
+    
+    # Add CSS file handler for 7c93fa6a directory
+    @app.route('/7c93fa6a/index.css')
+    def serve_7c93fa6a_css():
+        """Direct handler for 7c93fa6a/index.css file with proper MIME type"""
+        logger.info("Serving 7c93fa6a/index.css with proper MIME type")
+        file_path = os.path.join(app.root_path, 'static', '7c93fa6a', 'index.css')
+        if os.path.exists(file_path):
+            try:
+                with open(file_path, 'rb') as f:
+                    content = f.read()
+                
+                response = Response(
+                    content,
+                    content_type='text/css; charset=utf-8',
+                )
+                
+                # Add CORS headers
+                response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+                response.headers['Cross-Origin-Resource-Policy'] = 'cross-origin'
+                response.headers['Access-Control-Allow-Origin'] = '*'
+                
+                return response
+            except Exception as e:
+                logger.error(f"Error reading 7c93fa6a/index.css: {str(e)}")
+                return f"Error reading file: {str(e)}", 500
+        else:
+            # Try to create an empty CSS file if it doesn't exist
+            try:
+                os.makedirs(os.path.dirname(file_path), exist_ok=True)
+                with open(file_path, 'w') as f:
+                    f.write('/* CSS file created by server */')
+                logger.info(f"Created empty CSS file: {file_path}")
+                
+                response = Response(
+                    '/* CSS file created by server */',
+                    content_type='text/css; charset=utf-8',
+                )
+                
+                # Add CORS headers
+                response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+                response.headers['Cross-Origin-Resource-Policy'] = 'cross-origin'
+                response.headers['Access-Control-Allow-Origin'] = '*'
+                
+                return response
+            except Exception as e:
+                logger.error(f"Error creating CSS file: {str(e)}")
+                return f"Error creating file: {str(e)}", 500
+    
+    # Add handlers for JS chunk files with proper MIME types
+    @app.route('/037b440f/chunk.<path:filename>')
+    def serve_037b440f_chunk(filename):
+        """Direct handler for 037b440f/chunk.* JavaScript files with proper MIME type"""
+        logger.info(f"Serving 037b440f/chunk.{filename} with proper MIME type")
+        file_path = os.path.join(app.root_path, 'static', '037b440f', f'chunk.{filename}')
+        if os.path.exists(file_path):
+            try:
+                with open(file_path, 'rb') as f:
+                    content = f.read()
+                
+                response = Response(
+                    content,
+                    content_type='application/javascript; charset=utf-8',
+                )
+                
+                # Add CORS headers
+                response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+                response.headers['Pragma'] = 'no-cache'
+                response.headers['Expires'] = '0'
+                response.headers['Cross-Origin-Resource-Policy'] = 'cross-origin'
+                response.headers['Access-Control-Allow-Origin'] = '*'
+                
+                return response
+                
+            except Exception as e:
+                logger.error(f"Error serving 037b440f/chunk.{filename}: {str(e)}")
+        
+        # If file doesn't exist, create a stub JavaScript file
+        stub_js = f"// Stub file for missing 037b440f/chunk.{filename}\nconsole.log('Stub module loaded for chunk.{filename}');\nexport default {{}};"
+        
+        response = Response(
+            stub_js,
+            content_type='application/javascript; charset=utf-8',
+        )
+        
+        # Add CORS headers
+        response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+        response.headers['Pragma'] = 'no-cache'
+        response.headers['Expires'] = '0'
+        response.headers['Cross-Origin-Resource-Policy'] = 'cross-origin'
+        response.headers['Access-Control-Allow-Origin'] = '*'
+        
+        return response
+
+    @app.route('/7c93fa6a/chunk.<path:filename>')
+    def serve_7c93fa6a_chunk(filename):
+        """Direct handler for 7c93fa6a/chunk.* JavaScript files with proper MIME type"""
+        logger.info(f"Serving 7c93fa6a/chunk.{filename} with proper MIME type")
+        file_path = os.path.join(app.root_path, 'static', '7c93fa6a', f'chunk.{filename}')
+        if os.path.exists(file_path):
+            try:
+                with open(file_path, 'rb') as f:
+                    content = f.read()
+                
+                response = Response(
+                    content,
+                    content_type='application/javascript; charset=utf-8',
+                )
+                
+                # Add CORS headers
+                response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+                response.headers['Pragma'] = 'no-cache'
+                response.headers['Expires'] = '0'
+                response.headers['Cross-Origin-Resource-Policy'] = 'cross-origin'
+                response.headers['Access-Control-Allow-Origin'] = '*'
+                
+                return response
+                
+            except Exception as e:
+                logger.error(f"Error serving 7c93fa6a/chunk.{filename}: {str(e)}")
+        
+        # If file doesn't exist, create a stub JavaScript file
+        stub_js = f"// Stub file for missing 7c93fa6a/chunk.{filename}\nconsole.log('Stub module loaded for chunk.{filename}');\nexport default {{}};"
+        
+        response = Response(
+            stub_js,
+            content_type='application/javascript; charset=utf-8',
+        )
+        
+        # Add CORS headers
+        response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+        response.headers['Pragma'] = 'no-cache'
+        response.headers['Expires'] = '0'
+        response.headers['Cross-Origin-Resource-Policy'] = 'cross-origin'
+        response.headers['Access-Control-Allow-Origin'] = '*'
+        
+        return response
+
+    # Handle OPTIONS requests specifically for critical JS files
+    @app.route('/static/settings.js', methods=['OPTIONS'])
+    @app.route('/static/gkohcg1u379.js', methods=['OPTIONS'])
+    def handle_critical_js_options():
+        """Special OPTIONS handler for critical JS files"""
+        logger.debug(f"Handling OPTIONS for critical JS file: {request.path}")
+        response = app.make_default_options_response()
+        
+        response.headers.update({
+            'Access-Control-Allow-Origin': '*',
+            'Access-Control-Allow-Methods': 'GET, POST, OPTIONS, HEAD',
+            'Access-Control-Allow-Headers': 'Origin, X-Requested-With, Content-Type, Accept, Range, Authorization, Cookie, Set-Cookie',
+            'Access-Control-Allow-Credentials': 'true',
+            'Access-Control-Max-Age': '86400',  # 24 hours
+            'Access-Control-Allow-Private-Network': 'true',
+            'Access-Control-Expose-Headers': 'Set-Cookie',
+            'Vary': 'Origin, Access-Control-Request-Method, Access-Control-Request-Headers',
+            'Content-Type': 'application/javascript; charset=utf-8'
+        })
+        
+        # Set the amplify-polling-started cookie with proper cross-site attributes in preflight
+        response.set_cookie(
+            'amplify-polling-started', 
+            value='true',
+            max_age=86400,
+            samesite='None',
+            secure=True,
+            httponly=False,
+            path='/'
+        )
+        
+        return response
+
+    # Generic static file handler with proper MIME types
+    @app.route('/static/<path:path>')
+    def serve_static_files(path):
+        """Serve static files with enhanced security and performance headers"""
+        file_path = os.path.join(app.root_path, 'static', path)
+        if os.path.exists(file_path) and os.path.isfile(file_path):
+            try:
+                # Determine proper content type based on file extension
+                ext = os.path.splitext(path)[1].lower()
+                content_type = None
+                
+                if ext == '.js':
+                    content_type = 'application/javascript; charset=utf-8'
+                elif ext == '.css':
+                    content_type = 'text/css; charset=utf-8'
+                elif ext == '.json':
+                    content_type = 'application/json; charset=utf-8'
+                elif ext == '.html':
+                    content_type = 'text/html; charset=utf-8'
+                elif ext == '.txt':
+                    content_type = 'text/plain; charset=utf-8'
+                elif ext in ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg']:
+                    # Use standard image MIME types
+                    pass  # Flask will determine this automatically
+                
+                # Send file with optional content type if explicitly set
+                if content_type:
+                    response = send_file(file_path, mimetype=content_type)
+                else:
+                    response = send_file(file_path)
+                
+                # Add CORS headers for all static files
+                response.headers['Access-Control-Allow-Origin'] = '*'
+                response.headers['Cross-Origin-Resource-Policy'] = 'cross-origin'
+                
+                # Cache for 1 hour by default, but browser should revalidate
+                response.headers['Cache-Control'] = 'max-age=3600, must-revalidate'
+                
+                return response
+            except Exception as e:
+                logger.error(f"Error serving static file {path}: {str(e)}")
+                return f"Error serving file: {str(e)}", 500
+        else:
+            logger.warning(f"Static file not found: {file_path}")
+            return f"File not found: {path}", 404
 
     @app.route('/blob/<path:path>')
     def serve_blob_resources(path):
@@ -403,7 +1023,7 @@ def init_static_files(app):
             logger.error(traceback.format_exc())
             return f"Error fetching resource: {str(e)}", 500
 
-        # Add this fallback route for any other autodrone resources
+    # Add this fallback route for any other autodrone resources
     @app.route('/autodrone/<path:path>')
     def serve_autodrone_resources(path):
         """Fallback handler for autodrone resources"""
@@ -485,31 +1105,71 @@ def init_static_files(app):
         except Exception as e:
             logger.error(f"Error downloading image: {str(e)}")
             return "Error processing image", 500
-    @app.after_request
-    def add_security_headers(response):
-        """Add security headers to all responses"""
-        # Set a more permissive CSP header that allows media content
-        csp = (
-            "default-src 'self' * 'unsafe-inline' 'unsafe-eval'; "
-            "font-src 'self' * data: 'unsafe-inline'; "
-            "img-src 'self' * data: blob: 'unsafe-inline'; "
-            "style-src 'self' * 'unsafe-inline'; "
-            "script-src 'self' * 'unsafe-inline' 'unsafe-eval'; "
-            "connect-src 'self' * 'unsafe-inline'; "
-            "media-src 'self' * blob: data:; "  # Explicitly allow media sources
-            "worker-src 'self' blob:; "  # Allow web workers if needed
-            "frame-src 'self' *; "  # Allow iframes if needed
-        )
-        
-        # Set the CSP header
-        response.headers['Content-Security-Policy'] = csp
-        
-        # Add CORS headers for all responses
-        if request.path.startswith(('/proxy/media/', '/media/')):
-            response.headers['Access-Control-Allow-Origin'] = '*'
-            response.headers['Access-Control-Allow-Methods'] = 'GET, OPTIONS'
-            response.headers['Access-Control-Allow-Headers'] = 'Origin, Content-Type, Accept'
-            response.headers['Cross-Origin-Resource-Policy'] = 'cross-origin'
-        
+    
+    # Add a direct OPTIONS handler for all paths to support preflight requests for CORS
+    @app.route('/<path:path>', methods=['OPTIONS'])
+    @app.route('/', methods=['OPTIONS'])
+    def handle_options_request(path=''):
+        """Handle OPTIONS requests for CORS preflight"""
+        logger.debug(f"Handling CORS OPTIONS request for: {path}")
+        response = make_response()
+        response.headers.update({
+            'Access-Control-Allow-Origin': '*',
+            'Access-Control-Allow-Methods': 'GET, POST, OPTIONS, PUT, DELETE',
+            'Access-Control-Allow-Headers': 'Origin, X-Requested-With, Content-Type, Accept, Range, Authorization',
+            'Access-Control-Max-Age': '86400',  # 24 hours
+            'Vary': 'Origin, Access-Control-Request-Method, Access-Control-Request-Headers',
+            'Access-Control-Allow-Private-Network': 'true',
+            'Access-Control-Allow-Credentials': 'true'
+        })
         return response
+    
+    @app.route('/header.webp')
+    def serve_header_webp():
+        """Direct handler for header.webp to fix 404 issues"""
+        logger.info("Serving header.webp with direct handler")
+        
+        # First check in root directory
+        file_path = os.path.join(app.root_path, 'header.webp')
+        
+        # If not in root, check in images directory
+        if not os.path.exists(file_path):
+            file_path = os.path.join(app.root_path, 'images', 'play-now', 'header', 'header.webp')
+            
+        if os.path.exists(file_path):
+            return send_file(file_path, mimetype='image/webp')
+        
+        # If not found, try downloading it
+        try:
+            url = "https://overworld.illuvium.io/header.webp"
+            logger.info(f"Downloading header.webp from {url}")
+            
+            response = requests.get(url, stream=True)
+            
+            if response.status_code == 200:
+                # Save to root directory for future use
+                with open(os.path.join(app.root_path, 'header.webp'), 'wb') as f:
+                    for chunk in response.iter_content(chunk_size=8192):
+                        if chunk:
+                            f.write(chunk)
+                
+                # Serve the downloaded file
+                return send_file(os.path.join(app.root_path, 'header.webp'), mimetype='image/webp')
+            
+            # If download fails but we have a file in images directory, use that
+            if os.path.exists(os.path.join(app.root_path, 'images', 'play-now', 'header', 'header.webp')):
+                return send_file(os.path.join(app.root_path, 'images', 'play-now', 'header', 'header.webp'), mimetype='image/webp')
+                
+            # Return a transparent 1x1 pixel webp if all else fails
+            transparent_pixel = b'RIFF\x1a\x00\x00\x00WEBPVP8L\x0e\x00\x00\x00/\x00\x00\x00\x00\x00\x00\x00\x00'
+            return Response(transparent_pixel, mimetype='image/webp')
+            
+        except Exception as e:
+            logger.error(f"Error serving header.webp: {str(e)}")
+            
+            # Return a transparent 1x1 pixel webp if all else fails
+            transparent_pixel = b'RIFF\x1a\x00\x00\x00WEBPVP8L\x0e\x00\x00\x00/\x00\x00\x00\x00\x00\x00\x00\x00'
+            return Response(transparent_pixel, mimetype='image/webp')
+    
+    logger.info("Static files module initialized with enhanced JS handling for HTTP/2 context support")
     

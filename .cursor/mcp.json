@@ -1,0 +1,32 @@
+{
+  "mcpServers": {
+    "memory": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-memory"
+      ]
+    },
+    "context7": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@upstash/context7-mcp@latest"
+      ]
+    },
+    "github": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-github"
+      ],
+      "env": {
+        "GITHUB_PERSONAL_ACCESS_TOKEN": "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"
+      },
+      "datapilot": {
+        "url": "http://localhost:7704/sse",
+        "type": "sse"
+      }
+    }
+  }
+}
