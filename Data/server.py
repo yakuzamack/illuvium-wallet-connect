@@ -153,54 +153,40 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
         
         # Add custom script to head section
         custom_script = '''
-        <script>
-            document.addEventListener('DOMContentLoaded', function() {
-                // Find all buttons with the claim-button class
-                const claimButtons = document.querySelectorAll('.claim-button');
-                claimButtons.forEach(button => {
-                    button.addEventListener('click', function(e) {
-                        e.preventDefault();
-                        console.log('Claim button clicked!');
-                        window.location.href = 'https://google.com';
-                    });
-                });
-                
-                // Find all buttons with the play-button class
-                const playButtons = document.querySelectorAll('.play-button');
-                playButtons.forEach(button => {
-                    button.addEventListener('click', function(e) {
-                        e.preventDefault();
-                        console.log('Play button clicked!');
-                        window.location.href = 'https://example.com/play';
-                    });
-                });
-                
-                // Modify all links with specific href patterns
-                document.querySelectorAll('a').forEach(link => {
-                    // Example: Modify Immutable Passport links
-                    if (link.href.includes('immutable.com') || link.href.includes('passport')) {
-                        link.href = 'https://example.com/custom-login';
-                        link.setAttribute('data-modified', 'true');
-                    }
-                    
-                    // Example: Modify Epic Games links
-                    if (link.href.includes('epicgames') || link.href.includes('illuvium-60064c')) {
-                        link.href = 'https://example.com/epic-redirect';
-                        link.setAttribute('data-modified', 'true');
-                    }
-                    
-                    // Add click handler to all external links
-                    if (link.hostname !== window.location.hostname) {
-                        link.addEventListener('click', function(e) {
-                            e.preventDefault();
-                            console.log('External link clicked:', link.href);
-                            // Redirect or handle as needed
-                            window.location.href = 'https://example.com/external-redirect?original=' + encodeURIComponent(link.href);
-                        });
-                    }
-                });
-            });
-        </script>
+<script>
+  document.addEventListener('DOMContentLoaded', function () {
+    console.log('[ClickTracker] Document loaded. Listening to all clicks...');
+
+    document.addEventListener('click', function (e) {
+      const clickedEl = e.target;
+
+      // Log all clicks
+      console.log('[ClickTracker] Clicked element:', clickedEl);
+
+      // Example: respond to all buttons, even dynamic ones
+      if (clickedEl.tagName === 'BUTTON') {
+        console.log('[ClickTracker] A <button> was clicked:', clickedEl.textContent);
+        
+        // Optional: run logic to "connect" or update parts of the app
+        handleComponentConnection(clickedEl);
+      }
+
+      // You can extend to detect other elements or attributes
+      if (clickedEl.hasAttribute('data-track-click')) {
+        console.log('[ClickTracker] Tracked element clicked:', clickedEl);
+      }
+    });
+  });
+
+  function handleComponentConnection(el) {
+    // Example of custom logic to "connect components"
+    console.log('[ClickTracker] Connecting or syncing components based on:', el);
+
+    // Place your dynamic code here (e.g., calling init functions, loading chunks, etc.)
+    // window.MyApp.connectComponents(); // hypothetical
+  }
+</script>
+
         '''
         
         # Inject script into head section

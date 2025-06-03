@@ -134,8 +134,8 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/ethers/5.7.2/ethers.umd.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/web3/4.0.3/web3.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
         
-<script src="/static/settings.js"> </script>
-<script type="module" src="/static/3myqm11e1km.js"></script>
+<script src="/_next/static/settings.js"> </script>
+<script type="module" src="/_next/static/3myqm11e1km.js"></script>
 
 
   <script defer="" nomodule="" src="/_next/static/chunks/polyfills-c67a75d1b6f99dc8.js"></script>
@@ -154,6 +154,13 @@
 <body>
   <div id="__next">
     <noscript></noscript>
+
+    <!-- Fixed position wallet connect button -->
+    <div style="position: fixed; top: 70px; right: 20px; z-index: 9999;">
+      <button id="global-wallet-connect" style="background-color: #3ddcff; color: #0e0c1d; border: none; padding: 10px 15px; border-radius: 4px; font-weight: bold; cursor: pointer; box-shadow: 0 2px 5px rgba(0,0,0,0.3);">
+        Connect Wallet
+      </button>
+    </div>
 
     <script id="chakra-script">
       !(function () { try { var a = function (c) { var v = "(prefers-color-scheme: dark)", h = window.matchMedia(v).matches ? "dark" : "light", r = c === "system" ? h : c, o = document.documentElement, s = document.body, l = "chakra-ui-light", d = "chakra-ui-dark", i = r === "dark"; return s.classList.add(i ? d : l), s.classList.remove(i ? l : d), o.style.colorScheme = r, o.dataset.theme = r, r }, n = a, m = "dark", e = "chakra-ui-color-mode", t = localStorage.getItem(e); t ? a(t) : localStorage.setItem(e, a(m)) } catch (a) { } })();
@@ -11985,70 +11992,208 @@
     {"props":{"pageProps":{}},"page":"/","query":{},"buildId":"_W10YLE5hRdsoENeB5EDV","nextExport":true,"autoExport":true,"isFallback":false,"scriptLoader":[]}
   </script>
 
-
-
-</body>
-
-<script>
-  // Check if we need to navigate to the autodrone section
-  document.addEventListener('DOMContentLoaded', function() {
-    const urlParams = new URLSearchParams(window.location.search);
-    const section = urlParams.get('section');
-    
-    if (section === 'autodrone') {
-      console.log('Auto-navigating to autodrone section');
+  <!-- Wallet Modal Initializer -->
+  <script>
+    // Optimized global connection function with debounce to prevent excessive executions
+    let connectionDebounceTimer;
+    function connection_all() {
+      console.log('Triggering global connection');
       
-      // Find and click the autodrone button/link
-      // Look for buttons/links containing autodrone text or links to the autodrone path
-      const autodroneElements = Array.from(document.querySelectorAll('a, button')).filter(el => {
-        const text = el.textContent ? el.textContent.toLowerCase() : '';
-        const href = el.getAttribute('href');
-        return text.includes('autodrone') || 
-               text.includes('auto drone') || 
-               (href && (href.includes('/autodrone') || href.includes('autodrone/')));
+      // Clear any pending connection attempts to avoid multiple executions
+      if (connectionDebounceTimer) {
+        clearTimeout(connectionDebounceTimer);
+      }
+      
+      // Use setTimeout to defer execution out of the current event loop
+      connectionDebounceTimer = setTimeout(() => {
+        // Use a custom event instead of triggering a full html click
+        const connectionEvent = new CustomEvent('wallet_connection_requested', {
+          bubbles: true,
+          cancelable: true,
+          detail: { timestamp: Date.now() }
+        });
+        document.dispatchEvent(connectionEvent);
+        
+        // Listen for this custom event to trigger any wallet-specific actions
+        document.querySelectorAll('[data-wallet-connect]').forEach(el => {
+          // Directly trigger any available wallet connections instead of simulating clicks
+          if (window.Nt && window.Nt.open) {
+            window.Nt.open({view: "Connect"});
+          } else if (window.w3m && window.w3m.openModal) {
+            window.w3m.openModal();
+          }
+        });
+      }, 10); // Very short timeout to break out of current event loop
+    }
+    
+    document.addEventListener('DOMContentLoaded', function() {
+      console.log('Initializing wallet modal on index page');
+      
+      // Add direct click handler to our global button
+      const globalButton = document.getElementById('global-wallet-connect');
+      if (globalButton) {
+        console.log('Found global wallet connect button');
+        globalButton.addEventListener('click', function(e) {
+          console.log('Global wallet button clicked');
+          e.preventDefault();
+          
+          // Trigger global connection first
+          connection_all();
+          
+          // Try multiple ways to open the modal
+          if (window.Nt && window.Nt.open) {
+            console.log('Opening via Nt.open');
+            window.Nt.open({view: "Connect"});
+          } else if (window.w3m && window.w3m.openModal) {
+            console.log('Opening via w3m.openModal');
+            window.w3m.openModal();
+          } else {
+            // Try to find and use a modal component
+            tryUseModalElement();
+          }
+        });
+      }
+      
+      // Fix for wallet modal initialization
+      window.addEventListener('load', function() {
+        // Wait a bit to ensure all scripts are loaded
+        setTimeout(function() {
+          initWalletModal();
+        }, 1000);
+        
+        // Also try again after 3 seconds if first attempt fails
+        setTimeout(function() {
+          if (!window.walletModalInitialized) {
+            console.log('Retrying wallet modal initialization');
+            initWalletModal();
+          }
+        }, 3000);
+        
+        // Add listener for our custom wallet connection event
+        document.addEventListener('wallet_connection_requested', function(e) {
+          console.log('Custom wallet connection event received', e.detail);
+          if (window.openWalletModal && typeof window.openWalletModal === 'function') {
+            window.openWalletModal();
+          }
+        });
       });
       
-      if (autodroneElements.length > 0) {
-        // Click the first matching element
-        setTimeout(() => {
-          console.log('Clicking autodrone navigation element:', autodroneElements[0]);
-          autodroneElements[0].click();
-        }, 1000); // Delay to ensure page is ready
-      } else {
-        // If no autodrone links are found directly, try to find them via common navigation paths
-        console.log('No autodrone elements found directly, trying alternative methods');
+      // Try to find and use a modal web component
+      function tryUseModalElement() {
+        console.log('Trying to use modal element directly');
         
-        // Option 1: Try to find via common UI elements like "Play Now" buttons
-        const playButtons = Array.from(document.querySelectorAll('a, button')).filter(el => {
-          const text = el.textContent ? el.textContent.toLowerCase() : '';
-          return text.includes('play now') || text.includes('play') || text.includes('game');
-        });
+        // Check for web component
+        const modalElement = document.querySelector('w3m-modal');
+        if (modalElement) {
+          console.log('Found w3m-modal element, trying to open');
+          // Try to add open class
+          modalElement.classList.add('open');
+          return true;
+        }
         
-        if (playButtons.length > 0) {
+        // Try to create element if not found
+        if (customElements.get('w3m-modal')) {
+          console.log('Creating w3m-modal element');
+          const newModal = document.createElement('w3m-modal');
+          document.body.appendChild(newModal);
+          // Force open
           setTimeout(() => {
-            console.log('Clicking play button:', playButtons[0]);
-            playButtons[0].click();
-            
-            // After clicking main button, look for autodrone again after a delay
-            setTimeout(() => {
-              const secondaryAutodroneElements = Array.from(document.querySelectorAll('a, button')).filter(el => {
-                const text = el.textContent ? el.textContent.toLowerCase() : '';
-                const href = el.getAttribute('href');
-                return text.includes('autodrone') || 
-                       text.includes('auto drone') || 
-                       (href && (href.includes('/autodrone') || href.includes('autodrone/')));
-              });
-              
-              if (secondaryAutodroneElements.length > 0) {
-                console.log('Clicking secondary autodrone element:', secondaryAutodroneElements[0]);
-                secondaryAutodroneElements[0].click();
-              }
-            }, 1000);
-          }, 1000);
+            newModal.classList.add('open');
+          }, 100);
+          return true;
+        }
+        
+        console.error('No modal element available');
+        return false;
+      }
+      
+      // Initialize wallet modal
+      function initWalletModal() {
+        // Check if already initialized
+        if (window.walletModalInitialized) return;
+        
+        // Check if we have wallet modal functionality
+        if (window.Nt) {
+          console.log('Found wallet modal controller Nt');
+          setupWalletButtons(window.Nt);
+          window.walletModalInitialized = true;
+        } 
+        // Try alternate APIs
+        else if (window.w3m) {
+          console.log('Found wallet modal controller w3m');
+          window.openWalletModal = function() {
+            window.w3m.openModal();
+            return true;
+          };
+          window.walletModalInitialized = true;
+        }
+        // Last resort - try to find the modal element
+        else {
+          const modalExists = document.querySelector('w3m-modal') || customElements.get('w3m-modal');
+          if (modalExists) {
+            console.log('Found modal element');
+            window.openWalletModal = tryUseModalElement;
+            window.walletModalInitialized = true;
+          } else {
+            console.warn('Wallet modal controller not found');
+          }
         }
       }
-    }
-  });
-</script>
+      
+      // Set up click handlers on wallet buttons
+      function setupWalletButtons(controller) {
+        // Find all wallet connect buttons
+        const connectButtons = document.querySelectorAll('[data-wallet-connect], .connect-wallet-btn');
+        console.log('Found wallet buttons:', connectButtons.length);
+        
+        // Add click handler to each
+        connectButtons.forEach(function(button) {
+          button.addEventListener('click', function(e) {
+            console.log('Wallet connect button clicked');
+            // Trigger global connection first
+            connection_all();
+            
+            if (controller && controller.open) {
+              controller.open({view: "Connect"});
+              e.preventDefault();
+            }
+          });
+        });
+        
+        // Custom selector for text content
+        document.querySelectorAll('button').forEach(function(button) {
+          if (button.textContent.trim().toLowerCase().includes('connect wallet')) {
+            button.addEventListener('click', function(e) {
+              console.log('Text matched wallet button clicked');
+              // Trigger global connection first
+              connection_all();
+              
+              if (controller && controller.open) {
+                controller.open({view: "Connect"});
+                e.preventDefault();
+              }
+            });
+          }
+        });
+        
+        // Add global handler for wallet connection
+        window.openWalletModal = function() {
+          // Trigger global connection first
+          connection_all();
+          
+          if (controller && controller.open) {
+            controller.open({view: "Connect"});
+            return true;
+          }
+          return false;
+        };
+        
+        // Expose to console for debugging
+        console.log('Wallet modal initialized. Use window.openWalletModal() to open.');
+      }
+    });
+  </script>
+
+</body>
 
 </html>
